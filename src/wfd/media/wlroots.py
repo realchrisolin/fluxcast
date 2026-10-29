@@ -11,6 +11,7 @@ from ..encoding import (
 from ..env import _detect_audio_monitor
 from ..modes import _h264_level_for_mode
 from ..net import _ffmpeg_sender_args
+from .wlroots_lpcm import start_wf_recorder_lpcm, want_wf_recorder_lpcm
 
 
 class WlrootsMixin:
@@ -22,6 +23,9 @@ class WlrootsMixin:
         monitor = self.config.monitor
         if monitor is None:
             raise WFDNotReady("wf-recorder backend requires a selected monitor.")
+        if want_wf_recorder_lpcm(self.config):
+            start_wf_recorder_lpcm(self, wf_recorder, monitor)
+            return
         src_res = f"{monitor.width}x{monitor.height}"
         out_res = self.config.output_resolution or src_res
         audio_monitor = self.config.audio_device or _detect_audio_monitor()

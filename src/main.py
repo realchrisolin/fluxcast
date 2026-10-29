@@ -41,6 +41,7 @@ Wi-Fi Display (Miracast) Options:
                              RTP media sender (default: auto)
     --wfd-capture-backend auto|portal|wf-recorder|x11grab
                              Desktop capture backend for wfd (default: auto)
+    --wfd-wf-recorder-lpcm   wf-recorder → WFDLPCMMuxer (off by default)
     --wfd-encoder x264|va    H.264 encoder for the portal backend (default: x264)
     --wfd-rate-control vbr|cbr|qvbr
                              Rate control for --wfd-encoder va (default: qvbr)
@@ -162,6 +163,12 @@ def parse_args() -> argparse.Namespace:
                      choices=["auto", "ffmpeg", "gst"],
                      dest="wfd_media_pipeline",
                      help="For --protocol wfd, RTP media sender: auto (gst for test-pattern, ffmpeg for desktop), ffmpeg, or gst")
+    wfd.add_argument("--wfd-wf-recorder-lpcm", action="store_true",
+                     dest="wfd_wf_recorder_lpcm",
+                     help="For --wfd-capture-backend wf-recorder, send libx264 annex-B "
+                          "into the existing WFDLPCMMuxer (WFD LPCM 0x83) instead of "
+                          "ffmpeg AAC MPEG-TS. Off by default. Microsoft adapters also "
+                          "select this by peer name. Same as FLUXCAST_WFD_WF_RECORDER_LPCM=1")
     wfd.add_argument("--wfd-capture-backend", default="auto", dest="wfd_capture_backend",
                      choices=["auto", "portal", "wf-recorder", "x11grab", "gst-x11"],
                      help="Desktop capture backend for --protocol wfd: auto (default), portal, "

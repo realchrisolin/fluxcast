@@ -60,6 +60,8 @@ python3 src/main.py --protocol cast
 - `--wfd-media-pipeline auto|ffmpeg|gst`
 - `--wfd-capture-backend auto|portal|wf-recorder|x11grab|gst-x11`
   - `auto` uses `portal` first on KDE/GNOME Wayland, then `wf-recorder` fallback.
+- `--wfd-wf-recorder-lpcm`
+  - Off by default. wf-recorder sends libx264 annex-B into `WFDLPCMMuxer` (GStreamer appsink, WFD LPCM `0x83`) instead of ffmpeg AAC MPEG-TS. Microsoft adapters also select this by peer name. `FLUXCAST_WFD_WF_RECORDER_LPCM=1` is the same.
 - `--wfd-encoder x264|va`
 - `--wfd-rate-control vbr|cbr|qvbr`
 - `--wfd-latency-log [PATH]`
@@ -247,7 +249,7 @@ and protocol selection remain controlled by the tray and cannot be set here.
 - `--wfd-capture-backend`
   - `auto`: tries desktop capture backends in order and falls back on startup failure.
   - `portal`: Wayland ScreenCast through xdg-desktop-portal (KDE/GNOME preferred path).
-  - `wf-recorder`: recommended on Hyprland/wlroots.
+  - `wf-recorder`: recommended on Hyprland/wlroots. Microsoft adapters (and `--wfd-wf-recorder-lpcm` / `FLUXCAST_WFD_WF_RECORDER_LPCM=1`) send video as libx264 annex-B into the existing `WFDLPCMMuxer` (GStreamer appsink, WFD LPCM `0x83`). Default remains ffmpeg AAC MPEG-TS.
   - `x11grab`: useful for X11 sessions.
   - `gst-x11`: X11 capture routed through the GStreamer MPEG-TS pipeline (the same one the test pattern uses) instead of ffmpeg. Opt-in and never chosen by `auto`. Use it when a sink connects and streams but shows a black screen on the default ffmpeg path (confirmed on Hisense Vidaa). Requires `gst-launch-1.0`, `ximagesrc` (gst-plugins-good), and `x264enc` (gst-plugins-ugly).
   - `portal` backend requirements: `dbus-next`, `xdg-desktop-portal`, desktop portal backend, and `gst-launch-1.0`.

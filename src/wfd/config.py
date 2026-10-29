@@ -31,6 +31,8 @@ class WFDMediaConfig:
     h264_profile: str = "baseline"
     aosp_pmt_pid: bool = False  # opt-in: PMT on AOSP's 0x0100 instead of the muxer default (#84)
     dump_ts_path: Optional[str] = None
+    # Opt-in: wf-recorder → WFDLPCMMuxer (Microsoft adapters also match by name).
+    wf_recorder_lpcm: bool = False
 
 @dataclass
 class WFDVideoFormat:

@@ -126,6 +126,7 @@ _MODE_OPTIONS = {
         "wfd-capture-backend": _Option(
             _choice("auto", "portal", "wf-recorder", "x11grab", "gst-x11")
         ),
+        "wfd-wf-recorder-lpcm": _Option(_boolean, is_flag=True),
         "wfd-latency-log": _Option(_text),
         "wfd-aosp-pmt-pid": _Option(_boolean, is_flag=True),
         "wfd-no-audio": _Option(_boolean, is_flag=True),

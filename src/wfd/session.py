@@ -142,6 +142,7 @@ def start_experimental_backend(args) -> None:
         uibc=getattr(args, "wfd_uibc", False),
         aosp_pmt_pid=getattr(args, "wfd_aosp_pmt_pid", False),
         dump_ts_path=getattr(args, "wfd_dump_ts", None),
+        wf_recorder_lpcm=getattr(args, "wfd_wf_recorder_lpcm", False),
     )
     if media_config.dump_ts_path:
         print(f"[FluxCast WFD] Dumping transmitted MPEG-TS to: {media_config.dump_ts_path}")
