@@ -195,9 +195,9 @@ def parse_args() -> argparse.Namespace:
                           "at the stream bitrate")
     wfd.add_argument("--wfd-aosp-pmt-pid", action="store_true", dest="wfd_aosp_pmt_pid",
                      help="For --protocol wfd, write the MPEG-TS tables the way Android "
-                          "sinks expect them. Use it when the session connects but the "
-                          "sink shows a black screen, seen on Android TV boxes and "
-                          "projectors. Uses the ffmpeg sender")
+                          "sinks expect them (PMT 0x0100, table version 1; LPCM muxer "
+                          "also uses video PID 0x1011). Use it when the session connects "
+                          "but the sink shows a black screen")
     wfd.add_argument("--wfd-no-audio", action="store_true", dest="wfd_no_audio",
                      help="For --protocol wfd, stream video only")
     wfd.add_argument("--wfd-audio-device", default=None, dest="wfd_audio_device",

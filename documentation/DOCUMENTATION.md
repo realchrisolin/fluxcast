@@ -265,6 +265,8 @@ and protocol selection remain controlled by the tray and cannot be set here.
     them (PMT on PID `0x0100`, table version `1`). Use it when the session
     connects and RTP flows but the sink stays on a black screen - seen on
     Android TV boxes and projectors (see #84).
+  - On the LPCM muxer (`WFDLPCMMuxer`) this also splits PCR `0x1000` from
+    H.264 `0x1011` (default Microsoft layout keeps PCR and video on `0x1000`).
   - Off by default, since the standard layout works on most TVs. Muxes with
     ffmpeg: `auto` picks the ffmpeg sender, and `gst`/`gst-x11` warn because
     mpegtsmux cannot set the table version.

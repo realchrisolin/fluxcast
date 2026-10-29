@@ -132,7 +132,11 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
 
     vid_pipeline = gst_video_pipeline(r_fd)
     aud_pipeline = gst_audio_pipeline(audio_monitor)
-    muxer = WFDLPCMMuxer(media.tv_ip, media.sink_rtp_port)
+    muxer = WFDLPCMMuxer(
+        media.tv_ip,
+        media.sink_rtp_port,
+        aosp_pids=bool(media.config.aosp_pmt_pid),
+    )
     try:
         muxer.start(vid_pipeline, aud_pipeline)
     except Exception as exc:
@@ -169,7 +173,15 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
     ]
 
     print(f"[FluxCast WFD Media] Capturing screen : {monitor.name} ({src_res})")
-    print("[FluxCast WFD Media] Video encoder    : libx264 annex-B + WFDLPCMMuxer (0x83)")
+    pid_note = (
+        "AOSP PIDs PCR=0x1000 VID=0x1011"
+        if media.config.aosp_pmt_pid
+        else "Microsoft PIDs PCR=VID=0x1000"
+    )
+    print(
+        "[FluxCast WFD Media] Video encoder    : libx264 annex-B + "
+        f"WFDLPCMMuxer (0x83, {pid_note})"
+    )
     print(f"[FluxCast WFD Media] Capturing audio  : {audio_monitor} (pulsesrc → LPCM mux)")
     if out_res != src_res:
         print(f"[FluxCast WFD Media] Scaling output  : {out_res}")

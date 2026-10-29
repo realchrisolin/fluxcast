@@ -27,9 +27,22 @@ TS_SYNC = 0x47
 
 PID_PAT  = 0x0000
 PID_PMT  = 0x0100
-PID_PCR  = 0x1000   # same PID as video
-PID_VID  = 0x1000   # H.264
+PID_PCR  = 0x1000   # Microsoft: same PID as video. AOSP: dedicated PCR PID
+PID_VID  = 0x1000   # H.264 (Microsoft). AOSP uses 0x1011 — see lpcm_pid_layout()
+PID_VID_AOSP = 0x1011
 PID_AUD  = 0x1100   # LPCM
+
+
+def lpcm_pid_layout(aosp: bool) -> tuple[int, int, int, int]:
+    """PCR, video, audio PIDs, and PAT/PMT version_byte (current_next=1).
+
+    Microsoft adapters share PCR with video on 0x1000, table version 0.
+    AOSP / dongle sinks want PCR 0x1000, H.264 0x1011, table version 1
+    (``--wfd-aosp-pmt-pid``). Audio stays 0x1100.
+    """
+    if aosp:
+        return PID_PCR, PID_VID_AOSP, PID_AUD, 0xC3
+    return PID_PCR, PID_VID, PID_AUD, 0xC1
 
 STREAM_TYPE_H264 = 0x1B
 STREAM_TYPE_LPCM = 0x83   # WFD / WIDI LPCM (NOT 0x8b which is Blu-ray)
@@ -109,13 +122,13 @@ def _ts_packet(pid: int, payload: bytes, *,
     return pkt
 
 
-def _build_pat(continuity: int = 0) -> bytes:
+def _build_pat(continuity: int = 0, *, version_byte: int = 0xC1) -> bytes:
     section = bytearray()
     section += bytes([
         0x00,                     # table_id = PAT
         0xB0, 0x0D,                # section_syntax=1, section_length=13
         0x00, 0x01,                # transport_stream_id = 1
-        0xC1,                      # version=0, current_next=1
+        version_byte,              # version + current_next=1
         0x00,                      # section_number
         0x00,                      # last_section_number
         (PMT_PROG_NUM >> 8) & 0xFF,
@@ -129,23 +142,30 @@ def _build_pat(continuity: int = 0) -> bytes:
     payload = bytes([0x00]) + bytes(section)  # pointer_field = 0
     return _ts_packet(PID_PAT, payload, pusi=True, continuity=continuity)
 
-def _build_pmt(continuity: int = 0) -> bytes:
+def _build_pmt(
+    continuity: int = 0,
+    *,
+    pid_vid: int = PID_VID,
+    pid_aud: int = PID_AUD,
+    pid_pcr: int = PID_PCR,
+    version_byte: int = 0xC1,
+) -> bytes:
     # Build PMT section body (before CRC)
     streams = bytearray()
 
     # Video: H.264
     streams += bytes([
         STREAM_TYPE_H264,
-        0xE0 | ((PID_VID >> 8) & 0x1F),
-        PID_VID & 0xFF,
+        0xE0 | ((pid_vid >> 8) & 0x1F),
+        pid_vid & 0xFF,
         0xF0, 0x00, # no ES info descriptors
     ])
 
     # Audio: WFD LPCM (stream_type=0x83)
     streams += bytes([
         STREAM_TYPE_LPCM,
-        0xE0 | ((PID_AUD >> 8) & 0x1F),
-        PID_AUD & 0xFF,
+        0xE0 | ((pid_aud >> 8) & 0x1F),
+        pid_aud & 0xFF,
         0xF0, 0x00,
     ])
 
@@ -158,10 +178,10 @@ def _build_pmt(continuity: int = 0) -> bytes:
         section_length & 0xFF,
         (PMT_PROG_NUM >> 8) & 0xFF,
         PMT_PROG_NUM & 0xFF,
-        0xC1,                      # version=0, current_next=1
+        version_byte,              # version + current_next=1
         0x00, 0x00,                # section/last_section
-        0xE0 | ((PID_PCR >> 8) & 0x1F),
-        PID_PCR & 0xFF,
+        0xE0 | ((pid_pcr >> 8) & 0x1F),
+        pid_pcr & 0xFF,
         0xF0, 0x00,                # no program info descriptors
     ])
     section += streams
@@ -189,6 +209,11 @@ def _pcr_adaptation(pcr_90k: int) -> bytes:
         (pcr_b >>  8) & 0xFF,
         pcr_b & 0xFF,
     ])
+
+
+def _pcr_packet(pcr_90k: int, pid: int = PID_PCR) -> bytes:
+    """Dedicated PCR TS packet (AOSP: PCR 0x1000, video 0x1011)."""
+    return _ts_packet(pid, b"", pusi=True, continuity=0, adaptation=_pcr_adaptation(pcr_90k))
 
 
 # PES builder 
@@ -312,8 +337,12 @@ class WFDLPCMMuxer:
     Both pipelines must end in appsink named 'sink'.
     """
 
-    def __init__(self, dest_ip: str, dest_port: int):
+    def __init__(self, dest_ip: str, dest_port: int, *, aosp_pids: bool = False):
         self._dest   = (dest_ip, dest_port)
+        self.aosp_pids = bool(aosp_pids)
+        self.pid_pcr, self.pid_vid, self.pid_aud, self._table_version = lpcm_pid_layout(
+            self.aosp_pids
+        )
         self._sock   = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._rtp    = _RTPFramer()
         self._running = False
@@ -474,16 +503,27 @@ class WFDLPCMMuxer:
 
                 # PAT + PMT
                 if frame_counter % pat_pmt_interval == 0:
-                    ts_out.append(_build_pat(self._cc_pat[0]))
+                    ts_out.append(_build_pat(self._cc_pat[0], version_byte=self._table_version))
                     self._cc_pat[0] = (self._cc_pat[0] + 1) & 0x0F
-                    ts_out.append(_build_pmt(self._cc_pmt[0]))
+                    ts_out.append(_build_pmt(
+                        self._cc_pmt[0],
+                        pid_vid=self.pid_vid,
+                        pid_aud=self.pid_aud,
+                        pid_pcr=self.pid_pcr,
+                        version_byte=self._table_version,
+                    ))
                     self._cc_pmt[0] = (self._cc_pmt[0] + 1) & 0x0F
                 frame_counter += 1
 
-                # Video PES — PCR injected on first TS packet of this frame
+                # Microsoft: PCR rides on the video PID. AOSP: dedicated PCR PID.
+                if self.aosp_pids:
+                    ts_out.append(_pcr_packet(pcr_90k, self.pid_pcr))
+                    vid_pcr = None
+                else:
+                    vid_pcr = pcr_90k
                 ts_out += _packetize_pes(
-                    PID_VID, PES_SID_VIDEO, pts_90k,
-                    vid_data, self._cc_vid, pcr_90k=pcr_90k,
+                    self.pid_vid, PES_SID_VIDEO, pts_90k,
+                    vid_data, self._cc_vid, pcr_90k=vid_pcr,
                 )
                 self.frames_sent += 1
 
@@ -503,7 +543,7 @@ class WFDLPCMMuxer:
                     aud_payload = WIDI_LPCM_HEADER + LPCM_FRAME_HEADER + aud_data
 
                     ts_out += _packetize_pes(
-                        PID_AUD, PES_SID_AUDIO, aud_pts_90k,
+                        self.pid_aud, PES_SID_AUDIO, aud_pts_90k,
                         aud_payload, self._cc_aud,
                     )
                     self.audio_frames_sent += 1
