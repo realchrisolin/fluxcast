@@ -28,6 +28,11 @@ from ..encoding import (
 from ..env import _detect_audio_monitor
 from ..modes import _h264_level_for_mode
 from ..net import _ffmpeg_sender_args
+from ..wf_recorder import (
+    icc_opt_in,
+    wf_capture_rate_args,
+    wf_recorder_supports_icc,
+)
 
 _TRUE = ("1", "true", "yes", "on")
 _FALSE = ("0", "false", "no", "off")
@@ -206,6 +211,7 @@ def wf_recorder_dmabuf_cmd(
         wf_recorder,
         "-y",
         "-D",
+        *wf_capture_rate_args(wf_recorder, 0, vaapi_dmabuf=True),
         "-o", monitor_name,
         "-c", "h264_vaapi",
         "-d", device,
@@ -292,6 +298,8 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
         if use_dmabuf
         else "libx264 annex-B"
     )
+    if icc_opt_in() and wf_recorder_supports_icc(wf_recorder):
+        print("[FluxCast WFD Media] wf-recorder proto : icc")
     print(f"[FluxCast WFD Media] Capturing screen : {monitor.name} ({src_res})")
     print(
         f"[FluxCast WFD Media] Video encoder    : {enc_note} + "
@@ -339,7 +347,7 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
                 wf_recorder,
                 "-y",
                 "-D",
-                "-r", str(media.config.fps),
+                *wf_capture_rate_args(wf_recorder, media.config.fps),
                 "-o", monitor.name,
                 "-c", "rawvideo",
                 "-m", "nut",

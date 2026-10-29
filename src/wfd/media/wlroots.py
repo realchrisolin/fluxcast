@@ -3,7 +3,12 @@ import subprocess
 import time
 
 from ..config import WFDNotReady
-from ..wf_recorder import find_wf_recorder
+from ..wf_recorder import (
+    find_wf_recorder,
+    icc_opt_in,
+    wf_capture_rate_args,
+    wf_recorder_supports_icc,
+)
 from ..encoding import (
     _bitrate_to_kbits, _calculate_gop, _kbits_to_bitrate_text, _letterbox_vf,
     _effective_kbits, _parse_resolution, _vbv_bufsize, _x264_threads,
@@ -41,11 +46,13 @@ class WlrootsMixin:
                 f"{self.config.bitrate} -> {effective_bitrate}"
             )
 
+        if icc_opt_in() and wf_recorder_supports_icc(wf_recorder):
+            print("[FluxCast WFD Media] wf-recorder proto : icc")
         wf_cmd = [
             wf_recorder,
             "-y",
             "-D",
-            "-r", str(self.config.fps),
+            *wf_capture_rate_args(wf_recorder, self.config.fps),
             "-o", monitor.name,
             "-c", "rawvideo",
             "-m", "nut",
