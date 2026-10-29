@@ -13,6 +13,7 @@ from ..dump import schedule_ts_dump_report
 from ..encoding import _parse_resolution
 from ..latency import _append_latency_log
 from ..media.pipeline import WFDMediaPipeline
+from ..mode_state import write_mode_state
 from ..modes import (
     _choose_cea_mode, _encoder_h264_profile, _parse_sink_r2_video_formats,
     _parse_sink_video_format, _selected_r2_video_format, _selected_video_format,
@@ -376,6 +377,13 @@ class _WFDRTSPHandler(socketserver.StreamRequestHandler):
             )
             print(f"[FluxCast WFD RTSP] Negotiated media mode: {mode.name}")
             print(f"[FluxCast WFD RTSP] Selected video format: {self._video_format()}")
+            parent = getattr(self.server, "parent_server", None)
+            write_mode_state(
+                sink_format=self.sink_video_format,
+                current=mode,
+                peer=getattr(parent, "peer_address", "") if parent else "",
+                peer_name=self.media_config.peer_name,
+            )
             self._send_m4_set_parameters()
         elif name == "M4_SET_PARAMETER":
             self._send_m5_trigger_setup()

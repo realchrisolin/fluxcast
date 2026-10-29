@@ -281,6 +281,9 @@ and protocol selection remain controlled by the tray and cannot be set here.
   - Local RTP source port.
 - `--wfd-no-firewall`
   - Disables the automatic firewall handling described below.
+- `FLUXCAST_WFD_MODE_STATE=PATH`
+  - Optional. After RTSP mode negotiation, write JSON (`current`, `supported`,
+    peer identity, CEA/VESA masks) for an external UI. Unset: no file.
 
 ### WFD Input Back Channel (UIBC)
 
