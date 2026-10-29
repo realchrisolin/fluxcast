@@ -13,9 +13,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from wfd.config import WFDMediaConfig  # noqa: E402
 from wfd.media.wlroots_lpcm import (  # noqa: E402
     ffmpeg_libx264_annexb_args,
+    gst_audio_fd_pipeline,
     gst_audio_pipeline,
     gst_video_pipeline,
+    lpcm_audio_capture_cmd,
+    normalize_sink_monitor,
     want_lpcm_dmabuf,
+    want_pwcat_capture,
     want_wf_recorder_lpcm,
     wf_recorder_dmabuf_cmd,
 )
@@ -65,6 +69,27 @@ class PipelineStringsTest(unittest.TestCase):
         self.assertIn("pulsesrc device='miracast.monitor'", text)
         self.assertIn("format=S16BE", text)
         self.assertIn("appsink name=sink", text)
+
+    def test_audio_fd_pipeline_is_s16le_to_s16be(self):
+        text = gst_audio_fd_pipeline(5)
+        self.assertIn("fdsrc fd=5", text)
+        self.assertIn("format=S16LE", text)
+        self.assertIn("format=S16BE", text)
+
+    def test_pwcat_cmd_targets_monitor(self):
+        with mock.patch("wfd.media.wlroots_lpcm.shutil.which", return_value="/usr/bin/pw-cat"):
+            cmd = lpcm_audio_capture_cmd("miracast.monitor")
+        self.assertEqual(cmd[0], "pw-cat")
+        self.assertIn("--target", cmd)
+        self.assertIn("miracast.monitor", cmd)
+        self.assertIn("media.role=Abstract", cmd)
+
+    def test_normalize_monitor_suffix(self):
+        self.assertEqual(normalize_sink_monitor("miracast"), "miracast.monitor")
+        self.assertEqual(normalize_sink_monitor("miracast.monitor"), "miracast.monitor")
+
+    def test_pwcat_env_force_pulsesrc(self):
+        self.assertFalse(want_pwcat_capture("1"))
 
     def test_dmabuf_env(self):
         self.assertFalse(want_lpcm_dmabuf(""))

@@ -10,6 +10,7 @@ remains ffmpeg AAC MPEG-TS/RTP, and LPCM without that env stays libx264.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 
@@ -79,6 +80,70 @@ def gst_audio_pipeline(pulse_device: str) -> str:
         "audio/x-raw,format=S16BE,rate=48000,channels=2,layout=interleaved ! "
         "appsink name=sink sync=false"
     )
+
+
+def gst_audio_fd_pipeline(read_fd: int) -> str:
+    """S16LE from pw-cat/parec stdout → S16BE for WFD LPCM."""
+    return (
+        f"fdsrc fd={int(read_fd)} do-timestamp=true ! "
+        "audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved ! "
+        "audioconvert ! audio/x-raw,format=S16BE ! "
+        "appsink name=sink sync=false"
+    )
+
+
+def normalize_sink_monitor(audio_monitor: str) -> str:
+    am = (audio_monitor or "").strip()
+    if not am:
+        raise WFDNotReady("LPCM path requires a Pulse/PipeWire sink monitor")
+    if am in ("default", "auto") or "input" in am.lower():
+        raise WFDNotReady(
+            f"Refusing LPCM capture from {audio_monitor!r}; "
+            "need a sink monitor like 'miracast.monitor'"
+        )
+    if not am.endswith(".monitor"):
+        am = f"{am}.monitor"
+    return am
+
+
+def want_pwcat_capture(env: str | None = None) -> bool:
+    """pw-cat/parec unless FLUXCAST_WFD_LPCM_PULSESRC=1 forces Gst pulsesrc."""
+    raw = env if env is not None else os.environ.get("FLUXCAST_WFD_LPCM_PULSESRC") or ""
+    if raw.strip().lower() in _TRUE:
+        return False
+    return shutil.which("pw-cat") is not None or shutil.which("parec") is not None
+
+
+def lpcm_audio_capture_cmd(audio_monitor: str) -> list[str]:
+    """pw-cat --target binds the .monitor node; media.role=Abstract skips restore."""
+    if shutil.which("pw-cat") is not None:
+        return [
+            "pw-cat",
+            "-r",
+            "-a",
+            "--target", audio_monitor,
+            "--rate", "48000",
+            "--channels", "2",
+            "--format", "s16",
+            "-P", "application.name=fluxcast-wfd-capture",
+            "-P", f"media.name={audio_monitor}",
+            "-P", "media.role=Abstract",
+            "-P", "media.category=Capture",
+            "-P", f"target.object={audio_monitor}",
+            "-",
+        ]
+    return [
+        "parec",
+        f"--device={audio_monitor}",
+        "--client-name=fluxcast-wfd-capture",
+        f"--stream-name={audio_monitor}",
+        "--rate=48000",
+        "--channels=2",
+        "--format=s16le",
+        "--raw",
+        "--property=media.role=Abstract",
+        f"--property=module-stream-restore.id=fluxcast-wfd:{audio_monitor}",
+    ]
 
 
 def ffmpeg_libx264_annexb_args(
@@ -166,9 +231,9 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
 
     src_res = f"{monitor.width}x{monitor.height}"
     out_res = media.config.output_resolution or src_res
-    audio_monitor = media.config.audio_device or _detect_audio_monitor()
-    if not audio_monitor:
-        raise WFDNotReady("wf-recorder LPCM path needs a Pulse/PipeWire monitor source.")
+    audio_monitor = normalize_sink_monitor(
+        media.config.audio_device or _detect_audio_monitor() or ""
+    )
     gop = _calculate_gop(media.config)
     parsed_out = _parse_resolution(out_res) or (monitor.width, monitor.height)
     requested_kbits = _bitrate_to_kbits(media.config.bitrate)
@@ -180,9 +245,17 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
     r_fd, w_fd = os.pipe()
     os.set_inheritable(w_fd, True)
     os.set_inheritable(r_fd, False)
+    ar_fd = aw_fd = -1
+    use_pwcat = want_pwcat_capture()
+    if use_pwcat:
+        ar_fd, aw_fd = os.pipe()
+        os.set_inheritable(aw_fd, True)
+        os.set_inheritable(ar_fd, False)
 
     vid_pipeline = gst_video_pipeline(r_fd)
-    aud_pipeline = gst_audio_pipeline(audio_monitor)
+    aud_pipeline = (
+        gst_audio_fd_pipeline(ar_fd) if use_pwcat else gst_audio_pipeline(audio_monitor)
+    )
     muxer = WFDLPCMMuxer(
         media.tv_ip,
         media.sink_rtp_port,
@@ -193,6 +266,10 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
     except Exception as exc:
         os.close(r_fd)
         os.close(w_fd)
+        if ar_fd >= 0:
+            os.close(ar_fd)
+        if aw_fd >= 0:
+            os.close(aw_fd)
         muxer.stop()
         raise WFDNotReady(f"wf-recorder LPCM muxer failed to start: {exc}") from exc
 
@@ -220,7 +297,8 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
         f"[FluxCast WFD Media] Video encoder    : {enc_note} + "
         f"WFDLPCMMuxer (0x83, {pid_note})"
     )
-    print(f"[FluxCast WFD Media] Capturing audio  : {audio_monitor} (pulsesrc → LPCM mux)")
+    audio_note = "pw-cat --target → LPCM mux" if use_pwcat else "pulsesrc → LPCM mux"
+    print(f"[FluxCast WFD Media] Capturing audio  : {audio_monitor} ({audio_note})")
     if out_res != src_res:
         print(f"[FluxCast WFD Media] Scaling output  : {out_res}")
     print(
@@ -230,6 +308,7 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
 
     wf_proc = None
     ffmpeg_proc = None
+    aud_proc = None
     try:
         if use_dmabuf:
             wf_cmd = wf_recorder_dmabuf_cmd(
@@ -301,14 +380,33 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
             if ffmpeg_proc.poll() is not None:
                 raise WFDNotReady("ffmpeg exited immediately during LPCM annex-B encode.")
             media.processes = [wf_proc, ffmpeg_proc]
+        if use_pwcat:
+            aud_proc = subprocess.Popen(
+                lpcm_audio_capture_cmd(audio_monitor),
+                stdout=aw_fd,
+                stderr=None,
+                pass_fds=(aw_fd,),
+            )
+            os.close(aw_fd)
+            aw_fd = -1
+            time.sleep(0.3)
+            if aud_proc.poll() is not None:
+                raise WFDNotReady("pw-cat/parec exited immediately during LPCM capture.")
+            media.processes = list(media.processes) + [aud_proc]
     except Exception:
         if w_fd >= 0:
             os.close(w_fd)
         os.close(r_fd)
+        if aw_fd >= 0:
+            os.close(aw_fd)
+        if ar_fd >= 0:
+            os.close(ar_fd)
         if ffmpeg_proc is not None:
             ffmpeg_proc.terminate()
         if wf_proc is not None:
             wf_proc.terminate()
+        if aud_proc is not None:
+            aud_proc.terminate()
         muxer.stop()
         raise
 
