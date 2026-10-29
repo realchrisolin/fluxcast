@@ -2,8 +2,9 @@
 
 Portal already feeds Gst appsink into ``drivers.wfd_lpcm_mux.WFDLPCMMuxer``
 for Microsoft adapters. This module does the same on the wf-recorder path:
-stock libx264 annex-B (no DMA-BUF) plus pulsesrc PCM. Default remains
-ffmpeg AAC MPEG-TS/RTP.
+stock libx264 annex-B plus pulsesrc PCM. ``FLUXCAST_WFD_CAPTURE_ENCODE=dmabuf``
+opts into wf-recorder DMA-BUF ``h264_vaapi`` annex-B (no ffmpeg). Default
+remains ffmpeg AAC MPEG-TS/RTP, and LPCM without that env stays libx264.
 """
 
 from __future__ import annotations
@@ -48,6 +49,17 @@ def want_wf_recorder_lpcm(config: WFDMediaConfig, env: str | None = None) -> boo
     if getattr(config, "prefer_lpcm", False):
         return True
     return "microsoft" in (config.peer_name or "").lower()
+
+
+def want_lpcm_dmabuf(env: str | None = None) -> bool:
+    """True when FLUXCAST_WFD_CAPTURE_ENCODE=dmabuf|vaapi (LPCM path only)."""
+    raw = env if env is not None else os.environ.get("FLUXCAST_WFD_CAPTURE_ENCODE") or ""
+    return raw.strip().lower() in ("dmabuf", "vaapi", "dma")
+
+
+def vaapi_render_device() -> str | None:
+    path = (os.environ.get("FLUXCAST_VAAPI_DEVICE") or "").strip() or "/dev/dri/renderD128"
+    return path if os.path.exists(path) else None
 
 
 def gst_video_pipeline(read_fd: int) -> str:
@@ -108,6 +120,43 @@ def ffmpeg_libx264_annexb_args(
     ]
 
 
+def wf_recorder_dmabuf_cmd(
+    wf_recorder: str,
+    monitor_name: str,
+    *,
+    device: str,
+    bitrate_bits: int,
+    gop: int,
+    src_res: str,
+    out_res: str,
+    out_w: int,
+    out_h: int,
+) -> list[str]:
+    """wf-recorder DMA-BUF h264_vaapi annex-B on stdout. No -r (stock DMA)."""
+    if out_res != src_res:
+        vf = f"scale_vaapi=w={out_w}:h={out_h}:format=nv12:out_range=tv"
+    else:
+        vf = "scale_vaapi=format=nv12:out_range=tv"
+    return [
+        wf_recorder,
+        "-y",
+        "-D",
+        "-o", monitor_name,
+        "-c", "h264_vaapi",
+        "-d", device,
+        "-b", "0",
+        "-F", vf,
+        "-p", f"b={bitrate_bits}",
+        "-p", f"maxrate={bitrate_bits}",
+        "-p", "rc_mode=CBR",
+        "-p", f"gop_size={gop}",
+        "-p", "profile=constrained_baseline",
+        "-p", "bf=0",
+        "-m", "h264",
+        "-f", "/dev/stdout",
+    ]
+
+
 def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
     """Start wf-recorder + libx264 annex-B into WFDLPCMMuxer."""
     try:
@@ -147,41 +196,28 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
         muxer.stop()
         raise WFDNotReady(f"wf-recorder LPCM muxer failed to start: {exc}") from exc
 
-    wf_cmd = [
-        wf_recorder,
-        "-y",
-        "-D",
-        "-r", str(media.config.fps),
-        "-o", monitor.name,
-        "-c", "rawvideo",
-        "-m", "nut",
-        "-p", "pix_fmt=yuv420p",
-        "-f", "/dev/stdout",
-    ]
-    ffmpeg_cmd = [
-        *_ffmpeg_sender_args(media.config.ffmpeg_stats),
-        "-fflags", "+genpts",
-        "-thread_queue_size", "1024",
-        "-f", "nut",
-        "-i", "pipe:0",
-        *ffmpeg_libx264_annexb_args(
-            media.config,
-            src_res=src_res,
-            out_res=out_res,
-            bitrate=effective_bitrate,
-            gop=gop,
-            parsed_out_height=parsed_out[1],
-        ),
-    ]
+    device = vaapi_render_device() if want_lpcm_dmabuf() else None
+    use_dmabuf = bool(device)
+    if want_lpcm_dmabuf() and not device:
+        print(
+            "[FluxCast WFD Media] FLUXCAST_WFD_CAPTURE_ENCODE=dmabuf but no "
+            "VAAPI render node; falling back to libx264 annex-B",
+            flush=True,
+        )
 
-    print(f"[FluxCast WFD Media] Capturing screen : {monitor.name} ({src_res})")
     pid_note = (
         "AOSP PIDs PCR=0x1000 VID=0x1011"
         if media.config.aosp_pmt_pid
         else "Microsoft PIDs PCR=VID=0x1000"
     )
+    enc_note = (
+        "h264_vaapi DMA-BUF annex-B"
+        if use_dmabuf
+        else "libx264 annex-B"
+    )
+    print(f"[FluxCast WFD Media] Capturing screen : {monitor.name} ({src_res})")
     print(
-        "[FluxCast WFD Media] Video encoder    : libx264 annex-B + "
+        f"[FluxCast WFD Media] Video encoder    : {enc_note} + "
         f"WFDLPCMMuxer (0x83, {pid_note})"
     )
     print(f"[FluxCast WFD Media] Capturing audio  : {audio_monitor} (pulsesrc → LPCM mux)")
@@ -195,24 +231,76 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
     wf_proc = None
     ffmpeg_proc = None
     try:
-        wf_proc = subprocess.Popen(wf_cmd, stdout=subprocess.PIPE, stderr=None)
-        if wf_proc.stdout is None:
-            raise WFDNotReady("wf-recorder did not expose stdout.")
-        ffmpeg_proc = subprocess.Popen(
-            ffmpeg_cmd,
-            stdin=wf_proc.stdout,
-            stdout=w_fd,
-            stderr=None,
-            pass_fds=(w_fd,),
-        )
-        wf_proc.stdout.close()
-        os.close(w_fd)
-        w_fd = -1
-        time.sleep(1.0)
-        if wf_proc.poll() is not None:
-            raise WFDNotReady("wf-recorder exited immediately during LPCM streaming.")
-        if ffmpeg_proc.poll() is not None:
-            raise WFDNotReady("ffmpeg exited immediately during LPCM annex-B encode.")
+        if use_dmabuf:
+            wf_cmd = wf_recorder_dmabuf_cmd(
+                wf_recorder,
+                monitor.name,
+                device=device,
+                bitrate_bits=int(effective_kbits) * 1000,
+                gop=gop,
+                src_res=src_res,
+                out_res=out_res,
+                out_w=parsed_out[0],
+                out_h=parsed_out[1],
+            )
+            wf_proc = subprocess.Popen(
+                wf_cmd,
+                stdout=w_fd,
+                stderr=None,
+                pass_fds=(w_fd,),
+            )
+            os.close(w_fd)
+            w_fd = -1
+            time.sleep(1.0)
+            if wf_proc.poll() is not None:
+                raise WFDNotReady("wf-recorder DMA-BUF exited immediately during LPCM streaming.")
+            media.processes = [wf_proc]
+        else:
+            wf_cmd = [
+                wf_recorder,
+                "-y",
+                "-D",
+                "-r", str(media.config.fps),
+                "-o", monitor.name,
+                "-c", "rawvideo",
+                "-m", "nut",
+                "-p", "pix_fmt=yuv420p",
+                "-f", "/dev/stdout",
+            ]
+            ffmpeg_cmd = [
+                *_ffmpeg_sender_args(media.config.ffmpeg_stats),
+                "-fflags", "+genpts",
+                "-thread_queue_size", "1024",
+                "-f", "nut",
+                "-i", "pipe:0",
+                *ffmpeg_libx264_annexb_args(
+                    media.config,
+                    src_res=src_res,
+                    out_res=out_res,
+                    bitrate=effective_bitrate,
+                    gop=gop,
+                    parsed_out_height=parsed_out[1],
+                ),
+            ]
+            wf_proc = subprocess.Popen(wf_cmd, stdout=subprocess.PIPE, stderr=None)
+            if wf_proc.stdout is None:
+                raise WFDNotReady("wf-recorder did not expose stdout.")
+            ffmpeg_proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=wf_proc.stdout,
+                stdout=w_fd,
+                stderr=None,
+                pass_fds=(w_fd,),
+            )
+            wf_proc.stdout.close()
+            os.close(w_fd)
+            w_fd = -1
+            time.sleep(1.0)
+            if wf_proc.poll() is not None:
+                raise WFDNotReady("wf-recorder exited immediately during LPCM streaming.")
+            if ffmpeg_proc.poll() is not None:
+                raise WFDNotReady("ffmpeg exited immediately during LPCM annex-B encode.")
+            media.processes = [wf_proc, ffmpeg_proc]
     except Exception:
         if w_fd >= 0:
             os.close(w_fd)
@@ -225,4 +313,3 @@ def start_wf_recorder_lpcm(media, wf_recorder: str, monitor) -> None:
         raise
 
     media._lpcm_muxer = muxer
-    media.processes = [wf_proc, ffmpeg_proc]

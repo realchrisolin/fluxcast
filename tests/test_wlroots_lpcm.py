@@ -15,7 +15,9 @@ from wfd.media.wlroots_lpcm import (  # noqa: E402
     ffmpeg_libx264_annexb_args,
     gst_audio_pipeline,
     gst_video_pipeline,
+    want_lpcm_dmabuf,
     want_wf_recorder_lpcm,
+    wf_recorder_dmabuf_cmd,
 )
 
 
@@ -63,6 +65,29 @@ class PipelineStringsTest(unittest.TestCase):
         self.assertIn("pulsesrc device='miracast.monitor'", text)
         self.assertIn("format=S16BE", text)
         self.assertIn("appsink name=sink", text)
+
+    def test_dmabuf_env(self):
+        self.assertFalse(want_lpcm_dmabuf(""))
+        self.assertTrue(want_lpcm_dmabuf("dmabuf"))
+        self.assertTrue(want_lpcm_dmabuf("vaapi"))
+        self.assertFalse(want_lpcm_dmabuf("pipe"))
+
+    def test_dmabuf_cmd_is_h264_vaapi_not_ffmpeg(self):
+        cmd = wf_recorder_dmabuf_cmd(
+            "wf-recorder",
+            "HEADLESS-2",
+            device="/dev/dri/renderD128",
+            bitrate_bits=4_000_000,
+            gop=30,
+            src_res="1920x1080",
+            out_res="1920x1080",
+            out_w=1920,
+            out_h=1080,
+        )
+        self.assertIn("h264_vaapi", cmd)
+        self.assertIn("h264", cmd)
+        self.assertNotIn("libx264", cmd)
+        self.assertNotIn("-r", cmd)
 
     def test_annexb_is_libx264_not_rtp(self):
         args = ffmpeg_libx264_annexb_args(
