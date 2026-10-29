@@ -4,8 +4,8 @@ import time
 from dataclasses import replace
 from typing import Optional
 
+from .audio import AUDIO_LPCM, AUDIO_NONE, choose_wfd_audio, rtsp_audio_line
 from .config import WFDMediaConfig, WFDNotReady
-from .constants import WFD_AUDIO_AAC, WFD_AUDIO_LPCM_48K
 from .dump import schedule_ts_dump_report
 from .ie import WFDPeer
 from .media.pipeline import WFDMediaPipeline
@@ -178,23 +178,20 @@ def _active_rtsp_probe(
                         st["sink_rtp_port"], st["sink_rtcp_port"] = ports
                         st["sink_vfmt"] = _parse_sink_video_format(params.get("wfd_video_formats", ""))
                         audio = params.get("wfd_audio_codecs", "")
-                        _probe_microsoft = "microsoft" in media_config.peer_name.lower()
-                        if (
-                            audio
-                            and not media_config.no_audio
-                            and "AAC" not in audio.upper()
-                            and not _probe_microsoft
-                        ):
+                        choice = choose_wfd_audio(
+                            audio,
+                            peer_name=media_config.peer_name,
+                            no_audio=media_config.no_audio,
+                        )
+                        if choice == AUDIO_NONE:
                             st["no_audio"] = True
+                        elif choice == AUDIO_LPCM:
+                            st["prefer_lpcm"] = True
+                            media_config.prefer_lpcm = True
                         st["src_port"] = _safe_source_port(
                             media_config.source_port, st["sink_rtp_port"], st["sink_rtcp_port"])
                         vfmt = _selected_video_format(media_config, st["sink_vfmt"])
-                        if st["no_audio"]:
-                            afmt = "none"
-                        elif _probe_microsoft:
-                            afmt = WFD_AUDIO_LPCM_48K
-                        else:
-                            afmt = WFD_AUDIO_AAC
+                        afmt = rtsp_audio_line(choice)
                         rtcp = st["sink_rtcp_port"] if st["sink_rtcp_port"] > 0 else 0
                         m4 = (
                             "wfd_content_protection: none\r\n"

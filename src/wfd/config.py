@@ -16,6 +16,8 @@ class WFDMediaConfig:
     output_resolution: Optional[str] = None
     audio_device: Optional[str] = None
     no_audio: bool = False
+    # True after RTSP when the sink is LPCM-only (or PREFER_LPCM). Mux 0x83.
+    prefer_lpcm: bool = False
     test_pattern: bool = False
     ffmpeg_stats: bool = False
     source_port: int = 19002

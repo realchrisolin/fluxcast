@@ -45,6 +45,8 @@ def want_wf_recorder_lpcm(config: WFDMediaConfig, env: str | None = None) -> boo
         return True
     if flag in _FALSE:
         return False
+    if getattr(config, "prefer_lpcm", False):
+        return True
     return "microsoft" in (config.peer_name or "").lower()
 
 

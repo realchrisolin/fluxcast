@@ -7,7 +7,8 @@ from dataclasses import replace
 from typing import Optional
 
 from ..config import WFDCEAMode, WFDMediaConfig, WFDNotReady, WFDVideoFormat
-from ..constants import WFD_AUDIO_AAC, WFD_AUDIO_LPCM_48K, WFD_UIBC_PORT
+from ..audio import AUDIO_LPCM, AUDIO_NONE, choose_wfd_audio, rtsp_audio_line
+from ..constants import WFD_UIBC_PORT
 from ..dump import schedule_ts_dump_report
 from ..encoding import _parse_resolution
 from ..latency import _append_latency_log
@@ -82,6 +83,7 @@ class _WFDRTSPHandler(socketserver.StreamRequestHandler):
         self.sink_r2 = False
         self.m3_r2 = self.media_config.r2
         self.negotiated_no_audio = False
+        self.negotiated_lpcm = False
         self.m3_sent = False
         self.media: Optional[WFDMediaPipeline] = None
         self.connected_at = time.monotonic()
@@ -147,9 +149,9 @@ class _WFDRTSPHandler(socketserver.StreamRequestHandler):
     def _audio_codecs(self) -> str:
         if self.media_config.no_audio or self.negotiated_no_audio:
             return "none"
-        if "microsoft" in self.media_config.peer_name.lower():
-            return WFD_AUDIO_LPCM_48K
-        return WFD_AUDIO_AAC
+        if self.negotiated_lpcm:
+            return rtsp_audio_line(AUDIO_LPCM)
+        return rtsp_audio_line("aac")
 
     def _send_bytes(self, text: str) -> None:
         with self._write_lock:
@@ -350,20 +352,23 @@ class _WFDRTSPHandler(socketserver.StreamRequestHandler):
                         "input back-channel stays disabled for this session."
                     )
             audio = (params.get("wfd2_audio_codecs", "") if self.sink_r2 else "") or params.get("wfd_audio_codecs", "")
-            _is_microsoft = "microsoft" in self.media_config.peer_name.lower()
-            if (
-                audio
-                and not self.media_config.no_audio
-                and "AAC" not in audio.upper()
-                and not _is_microsoft
-            ):
-                self.negotiated_no_audio = True
+            choice = choose_wfd_audio(
+                audio,
+                peer_name=self.media_config.peer_name,
+                no_audio=self.media_config.no_audio,
+            )
+            self.negotiated_no_audio = choice == AUDIO_NONE
+            self.negotiated_lpcm = choice == AUDIO_LPCM
+            if self.negotiated_no_audio:
                 print(
-                    "[FluxCast WFD RTSP] TV did not advertise AAC; "
+                    "[FluxCast WFD RTSP] TV advertised no AAC/LPCM audio; "
                     "falling back to video-only WFD."
                 )
-            if _is_microsoft and audio:
-                print(f"[FluxCast WFD RTSP] Microsoft adapter audio caps: {audio}")
+            elif self.negotiated_lpcm:
+                print(
+                    f"[FluxCast WFD RTSP] negotiating WFD LPCM "
+                    f"(caps={audio or 'microsoft'}; stream_type=0x83)."
+                )
             mode = self._cea_mode()
             print(
                 f"[FluxCast WFD RTSP] TV RTP port: {self.sink_rtp_port}; "
@@ -500,6 +505,7 @@ class _WFDRTSPHandler(socketserver.StreamRequestHandler):
                 output_resolution=mode.resolution,
                 fps=mode.fps,
                 no_audio=self.media_config.no_audio or self.negotiated_no_audio,
+                prefer_lpcm=self.negotiated_lpcm,
                 h264_profile=_encoder_h264_profile(self.sink_video_format),
             )
             # Say so when the sink has no mode matching an explicit --output-res,

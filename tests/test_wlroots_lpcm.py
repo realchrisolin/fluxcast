@@ -34,6 +34,9 @@ class WantLpcmTest(unittest.TestCase):
             want_wf_recorder_lpcm(_cfg(peer_name="Microsoft Wireless Display Adapter"), env="")
         )
 
+    def test_prefer_lpcm_config(self):
+        self.assertTrue(want_wf_recorder_lpcm(_cfg(peer_name="hotyeah", prefer_lpcm=True), env=""))
+
     def test_env_opt_in(self):
         self.assertTrue(want_wf_recorder_lpcm(_cfg(peer_name="hotyeah"), env="1"))
 

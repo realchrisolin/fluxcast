@@ -605,7 +605,13 @@ class PortalMixin:
         # Microsoft adapter requires MPEG-TS stream_type=0x83 (WFD LPCM) with a
         # 4-byte WIDI PES header. GStreamer mpegtsmux hardcodes 0x8b (Blu-ray LPCM)
         # and cannot be changed at runtime, so we use a pure-Python MPEG-TS muxer.
-        if "microsoft" in self.config.peer_name.lower() and not self.config.no_audio:
+        if (
+            not self.config.no_audio
+            and (
+                self.config.prefer_lpcm
+                or "microsoft" in self.config.peer_name.lower()
+            )
+        ):
             print("[FluxCast WFD Media] Microsoft adapter detected — using LPCM MPEG-TS muxer")
             try:
                 from drivers.wfd_lpcm_mux import WFDLPCMMuxer
