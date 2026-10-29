@@ -22,7 +22,7 @@ class WFDMediaConfig:
     media_pipeline: str = "auto"
     latency_log_path: Optional[str] = None
     capture_backend: str = "auto"
-    encoder: str = "x264"  # portal backend H.264 encoder: x264 or va (vah264enc)
+    encoder: str = "x264"  # x264 | va (portal vah264enc) | vaapi (wf-recorder ffmpeg h264_vaapi)
     rate_control: str = "qvbr"  # vah264enc rate control: qvbr, vbr or cbr
     r2: bool = False  # opt-in: ask for wfd2_video_formats; used only when it gives a better mode
     peer_name: str = ""

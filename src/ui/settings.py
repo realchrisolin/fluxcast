@@ -102,7 +102,7 @@ _GROUPS = {
     "wfd": (
         (_l("Video"), _VIDEO + (
             ("wfd-encoder", _l("H.264 encoder"), "choice",
-             _l("va encodes on the GPU through VA-API and falls back to x264 when it is missing")),
+             _l("va is portal GPU (vah264enc); vaapi is wf-recorder ffmpeg h264_vaapi; both fall back to x264")),
             ("wfd-rate-control", _l("Rate control"), "choice",
              _l("Only used with the va encoder. Default qvbr")),
         )),

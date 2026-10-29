@@ -60,7 +60,7 @@ python3 src/main.py --protocol cast
 - `--wfd-media-pipeline auto|ffmpeg|gst`
 - `--wfd-capture-backend auto|portal|wf-recorder|x11grab|gst-x11`
   - `auto` uses `portal` first on KDE/GNOME Wayland, then `wf-recorder` fallback.
-- `--wfd-encoder x264|va`
+- `--wfd-encoder x264|va|vaapi`
 - `--wfd-rate-control vbr|cbr|qvbr`
 - `--wfd-latency-log [PATH]`
 - `--wfd-aosp-pmt-pid` write MPEG-TS tables the way Android (AOSP) sinks expect them
@@ -252,9 +252,9 @@ and protocol selection remain controlled by the tray and cannot be set here.
   - `gst-x11`: X11 capture routed through the GStreamer MPEG-TS pipeline (the same one the test pattern uses) instead of ffmpeg. Opt-in and never chosen by `auto`. Use it when a sink connects and streams but shows a black screen on the default ffmpeg path (confirmed on Hisense Vidaa). Requires `gst-launch-1.0`, `ximagesrc` (gst-plugins-good), and `x264enc` (gst-plugins-ugly).
   - `portal` backend requirements: `dbus-next`, `xdg-desktop-portal`, desktop portal backend, and `gst-launch-1.0`.
 - `--wfd-encoder`
-  - H.264 encoder for the `portal` backend. Other backends ignore it.
-  - `x264` (default): software `x264enc`.
-  - `va`: GPU encoding through VA-API `vah264enc` (gst-plugins-bad), which uses far less CPU. Needs a VA-API driver with H.264 encode; on Fedora that is RPM Fusion's `intel-media-driver`, since Fedora's `libva-intel-media-driver` has no H.264. Falls back to `x264` when `vah264enc` is not available.
+  - `x264` (default): software encode (`x264enc` on portal, `libx264` on wf-recorder).
+  - `va`: portal backend only. GPU encoding through VA-API `vah264enc` (gst-plugins-bad). Needs a VA-API driver with H.264 encode; on Fedora that is RPM Fusion's `intel-media-driver`, since Fedora's `libva-intel-media-driver` has no H.264. Falls back to `x264` when `vah264enc` is not available.
+  - `vaapi`: wf-recorder backend only (issue #19). ffmpeg `h264_vaapi` on the existing rawvideo pipe. No DMA-BUF. Falls back to `libx264` when the encoder or `/dev/dri/renderD128` is missing. Same value via `FLUXCAST_WFD_ENCODER=vaapi` when the flag is left at default.
 - `--wfd-rate-control`
   - Rate control for `--wfd-encoder va`. Ignored by `x264`.
   - `qvbr` (default): constant quality, up to `--bitrate`. Keeps keyframes close to x264's size; falls back to `vbr` when the VA driver does not offer it.

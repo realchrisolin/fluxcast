@@ -1,15 +1,18 @@
-import shutil
 import subprocess
 import time
 
 from ..config import WFDNotReady
 from ..wf_recorder import find_wf_recorder
 from ..encoding import (
-    _bitrate_to_kbits, _calculate_gop, _kbits_to_bitrate_text, _letterbox_vf,
-    _effective_kbits, _parse_resolution, _vbv_bufsize, _x264_threads,
+    _bitrate_to_kbits, _calculate_gop, _kbits_to_bitrate_text,
+    _effective_kbits, _parse_resolution,
 )
 from ..env import _detect_audio_monitor
-from ..modes import _h264_level_for_mode
+from ..hw_vaapi import (
+    ffmpeg_h264_pipe_args,
+    vaapi_ffmpeg_global_args,
+    vaapi_render_device,
+)
 from ..net import _ffmpeg_sender_args
 
 
@@ -49,8 +52,18 @@ class WlrootsMixin:
             "-f", "/dev/stdout",
         ]
 
+        video_args, video_label, used_vaapi = ffmpeg_h264_pipe_args(
+            self.config,
+            src_res=src_res,
+            out_res=out_res,
+            bitrate=effective_bitrate,
+            gop=gop,
+            parsed_out_height=parsed_out[1],
+        )
+        vaapi_device = vaapi_render_device() if used_vaapi else None
         ffmpeg_cmd = [
             *_ffmpeg_sender_args(self.config.ffmpeg_stats),
+            *(vaapi_ffmpeg_global_args(vaapi_device) if vaapi_device else []),
             "-fflags", "+genpts",
             "-thread_queue_size", "1024",
             "-f", "nut",
@@ -68,29 +81,7 @@ class WlrootsMixin:
         else:
             ffmpeg_cmd += ["-map", "0:v:0"]
 
-        if out_res == src_res:
-            ffmpeg_cmd += ["-vf", "format=yuv420p"]
-        else:
-            ffmpeg_cmd += ["-vf", _letterbox_vf(out_res)]
-
-        ffmpeg_cmd += [
-            "-c:v", "libx264",
-            "-preset", "ultrafast" if parsed_out[1] > 1080 else "veryfast",
-            "-tune", "zerolatency",
-            "-threads", str(_x264_threads()),
-            "-profile:v", self.config.h264_profile,
-            "-level:v", _h264_level_for_mode(self.config),
-            "-pix_fmt", "yuv420p",
-            "-r", str(self.config.fps),
-            "-g", str(gop),
-            "-keyint_min", str(gop),
-            "-sc_threshold", "0",
-            "-bf", "0",
-            "-b:v", effective_bitrate,
-            "-maxrate", effective_bitrate,
-            "-bufsize", _vbv_bufsize(effective_bitrate, self.config),
-            "-x264-params", "repeat-headers=1:aud=1",
-        ]
+        ffmpeg_cmd += video_args
 
         if not self.config.no_audio:
             ffmpeg_cmd += [
@@ -106,6 +97,7 @@ class WlrootsMixin:
         ffmpeg_cmd += self._common_output_args()
 
         print(f"[FluxCast WFD Media] Capturing screen : {monitor.name} ({src_res})")
+        print(f"[FluxCast WFD Media] Video encoder    : {video_label}")
         if not self.config.no_audio:
             print(f"[FluxCast WFD Media] Capturing audio  : {audio_monitor}")
         if out_res != src_res:

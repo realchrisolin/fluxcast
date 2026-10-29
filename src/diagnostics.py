@@ -325,6 +325,38 @@ def _ffmpeg_encoders() -> Check:
     )
 
 
+def _wf_recorder_vaapi_hint() -> Check:
+    """Point at --wfd-encoder vaapi when ffmpeg has h264_vaapi (issue #19)."""
+    name = "wf-recorder VAAPI"
+    enc = (os.environ.get("FLUXCAST_WFD_ENCODER") or "").strip().lower()
+    ffmpeg = _first_matching_command(["ffmpeg", "/usr/sbin/ffmpeg"])
+    if not ffmpeg:
+        return Check(name, STATUS_SKIP, "ffmpeg was not found", "")
+    try:
+        result = _run([ffmpeg, "-hide_banner", "-encoders"], timeout=5.0)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return Check(name, STATUS_SKIP, "could not query ffmpeg encoders", str(exc))
+    text = (result.stdout or "") + (result.stderr or "")
+    if "h264_vaapi" not in text:
+        return Check(
+            name, STATUS_SKIP,
+            "ffmpeg has no h264_vaapi encoder",
+            "",
+        )
+    if enc == "vaapi":
+        return Check(
+            name, STATUS_OK,
+            "wf-recorder path will use ffmpeg h264_vaapi",
+            "FLUXCAST_WFD_ENCODER=vaapi",
+        )
+    return Check(
+        name, STATUS_WARN,
+        "h264_vaapi is available; wf-recorder still defaults to libx264",
+        "set --wfd-encoder vaapi or FLUXCAST_WFD_ENCODER=vaapi (issue #19); "
+        "portal GPU encode remains --wfd-encoder va",
+    )
+
+
 _PORTAL_BACKENDS = [
     "xdg-desktop-portal-hyprland",
     "xdg-desktop-portal-kde",
@@ -1029,6 +1061,7 @@ def run_diagnostics(skip_firewall: bool = False) -> DiagnosticReport:
         _portal_gst_elements_check(),
         _python_module_check("dbus_next", "WFD portal capture control plane for KDE/GNOME Wayland"),
         _ffmpeg_encoders(),
+        _wf_recorder_vaapi_hint(),
         _display_capture_check(),
         _audio_check(),
         _nmcli_check(),

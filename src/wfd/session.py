@@ -10,6 +10,7 @@ from .env import _is_hyprland_session, _is_wayland_session
 from .firewall import (
     _close_wfd_firewall_port, _open_wfd_firewall_port, _warn_if_ufw_may_block,
 )
+from .hw_vaapi import resolve_encoder
 from .p2p.device import _set_p2p_device_name, _set_p2p_go_intent
 from .p2p.nm import (
     _connect_peer, _deactivate_connection, _disconnect_device,
@@ -135,7 +136,7 @@ def start_experimental_backend(args) -> None:
         media_pipeline=getattr(args, "wfd_media_pipeline", "auto"),
         latency_log_path=getattr(args, "wfd_latency_log", None),
         capture_backend=getattr(args, "wfd_capture_backend", "auto"),
-        encoder=getattr(args, "wfd_encoder", "x264"),
+        encoder=resolve_encoder(getattr(args, "wfd_encoder", "x264")),
         rate_control=getattr(args, "wfd_rate_control", "qvbr"),
         r2=getattr(args, "wfd_r2", False),
         peer_name=peer.name,

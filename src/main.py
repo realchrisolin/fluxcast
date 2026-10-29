@@ -41,7 +41,8 @@ Wi-Fi Display (Miracast) Options:
                              RTP media sender (default: auto)
     --wfd-capture-backend auto|portal|wf-recorder|x11grab
                              Desktop capture backend for wfd (default: auto)
-    --wfd-encoder x264|va    H.264 encoder for the portal backend (default: x264)
+    --wfd-encoder x264|va|vaapi
+                             x264 default; va = portal vah264enc; vaapi = wf-recorder ffmpeg h264_vaapi
     --wfd-rate-control vbr|cbr|qvbr
                              Rate control for --wfd-encoder va (default: qvbr)
     --wfd-r2                 Try WFD R2 (wfd2_video_formats) for a better mode, e.g. 1080p60
@@ -168,10 +169,12 @@ def parse_args() -> argparse.Namespace:
                           "wf-recorder, x11grab, or gst-x11 (X11 capture through the GStreamer "
                           "MPEG-TS pipeline, for sinks that black-screen on the ffmpeg path)")
     wfd.add_argument("--wfd-encoder", default="x264", dest="wfd_encoder",
-                     choices=["x264", "va"],
-                     help="For --protocol wfd, H.264 encoder used by the portal capture "
-                          "backend: x264 (default, software) or va (GPU through VA-API "
-                          "vah264enc; falls back to x264 when it is not available)")
+                     choices=["x264", "va", "vaapi"],
+                     help="H.264 encoder: x264 (default, software); va = portal GStreamer "
+                          "vah264enc; vaapi = wf-recorder ffmpeg h264_vaapi (issue #19). "
+                          "va/vaapi fall back to x264 when the GPU encoder is missing. "
+                          "FLUXCAST_WFD_ENCODER=vaapi is the same as --wfd-encoder vaapi "
+                          "when the flag is left at default")
     wfd.add_argument("--wfd-rate-control", default="qvbr", dest="wfd_rate_control",
                      choices=["vbr", "cbr", "qvbr"],
                      help="For --wfd-encoder va, vah264enc rate control: qvbr (default, "
