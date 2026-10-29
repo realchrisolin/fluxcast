@@ -1,3 +1,4 @@
+import signal
 import threading
 import time
 
@@ -36,6 +37,9 @@ def _cleanup_step(label: str, action) -> None:
         print(f"[FluxCast WFD] Cleanup step '{label}' failed: {exc}")
 
 def start_experimental_backend(args) -> None:
+    # Default SIGUSR1 terminates the process. Ignore until the wait loop
+    # installs the capture-rebind handler (after P2P/DHCP/RTSP listen).
+    signal.signal(signal.SIGUSR1, signal.SIG_IGN)
     report = run_diagnostics(skip_firewall=getattr(args, "wfd_no_firewall", False))
     print_report(report)
     print()
@@ -218,9 +222,33 @@ def start_experimental_backend(args) -> None:
         )
         probe_thread.start()
 
+        # SIGUSR1 = rebind desktop capture without tearing down RTSP/P2P.
+        restart_capture = threading.Event()
+
+        def _request_capture_restart(signum, frame):  # noqa: ARG001
+            print("[FluxCast WFD] SIGUSR1: capture restart requested")
+            restart_capture.set()
+
+        signal.signal(signal.SIGUSR1, _request_capture_restart)
+
         print("[FluxCast WFD] Waiting for TV RTSP/WFD session. Press Ctrl+C to stop.")
+        print("[FluxCast WFD] Tip: kill -USR1 <pid> rebinds capture without dropping RTSP.")
         while True:
-            time.sleep(1)
+            if restart_capture.is_set():
+                restart_capture.clear()
+                if getattr(rtsp, "any_media_restarting", lambda: False)():
+                    print(
+                        "[FluxCast WFD] SIGUSR1 coalesced "
+                        "(capture restart already in flight)"
+                    )
+                    time.sleep(0.25)
+                    continue
+                try:
+                    n = rtsp.restart_active_media()
+                    print(f"[FluxCast WFD] Capture restart finished ({n} pipeline(s)).")
+                except Exception as exc:
+                    print(f"[FluxCast WFD] Capture restart failed: {exc}")
+            time.sleep(0.25)
     except KeyboardInterrupt:
         print("\n[FluxCast WFD] Stopping WFD session...")
     finally:

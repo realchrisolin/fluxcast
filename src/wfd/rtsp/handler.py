@@ -629,16 +629,22 @@ class _WFDRTSPHandler(socketserver.StreamRequestHandler):
         if not self._keepalive_active:
             return
         media = self.media
-        # Only stop the chain if processes have already EXITED.
-        # If media is None (portal dialog still open), keep sending keepalives.
-        if media is not None and not all(p.poll() is None for p in media.processes):
+        # M16 is independent of capture/RTP. During SIGUSR1 rebind, senders
+        # are briefly dead — do not drop the keepalive chain. Bare Session
+        # id: some sinks 454 on ";timeout=" in M16.
+        if (
+            media is not None
+            and not getattr(media, "restarting", False)
+            and media.processes
+            and not all(p.poll() is None for p in media.processes)
+        ):
             return
         try:
             self._send_request(
                 "M16_KEEPALIVE",
                 "GET_PARAMETER",
                 self._rtsp_presentation_uri(),
-                headers={"Session": f"{self.session_id};timeout=30"},
+                headers={"Session": self.session_id},
             )
             print("[FluxCast WFD RTSP] M16 keepalive sent")
             return 25.0

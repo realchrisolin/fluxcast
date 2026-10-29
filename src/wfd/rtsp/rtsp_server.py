@@ -200,6 +200,27 @@ class WFDRTSPServer:
             except ValueError:
                 pass
 
+    def restart_active_media(self) -> int:
+        """Restart capture/encode for every live PLAY session. Returns count."""
+        with self._media_lock:
+            pipelines = list(self._active_media)
+        restarted = 0
+        for pipeline in pipelines:
+            if getattr(pipeline, "restarting", False):
+                print(
+                    "[FluxCast WFD] Capture restart coalesced "
+                    "(pipeline already restarting)"
+                )
+                continue
+            pipeline.restart_video()
+            restarted += 1
+        return restarted
+
+    def any_media_restarting(self) -> bool:
+        with self._media_lock:
+            pipelines = list(self._active_media)
+        return any(getattr(p, "restarting", False) for p in pipelines)
+
     def stop_all_media(self) -> None:
         with self._media_lock:
             pipelines = list(self._active_media)

@@ -281,6 +281,10 @@ and protocol selection remain controlled by the tray and cannot be set here.
   - Local RTP source port.
 - `--wfd-no-firewall`
   - Disables the automatic firewall handling described below.
+- `kill -USR1 <fluxcast-pid>`
+  - Rebuilds desktop capture (wf-recorder / x11) without dropping RTSP or P2P.
+    Portal capture respawns from the retained PipeWire fd. Concurrent signals
+    coalesce. M16 keepalives keep running during the swap.
 - `FLUXCAST_WFD_MODE_STATE=PATH`
   - Optional. After RTSP mode negotiation, write JSON (`current`, `supported`,
     peer identity, CEA/VESA masks) for an external UI. Unset: no file.
